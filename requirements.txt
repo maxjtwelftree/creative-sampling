@@ -1,0 +1,7 @@
+torch>=1.9.0
+transformers>=4.8.0
+numpy>=1.19.5
+music21>=7.1.0
+tqdm>=4.62.0
+matplotlib>=3.4.3
+flask>=2.0.1
