@@ -111,85 +111,120 @@ def create_mapping(notes):
     
     return note_to_int, int_to_note, len(vocabulary)
 
+# Modify utils/data_processor.py to include better error handling
+
 def prepare_sequences(notes, note_to_int, sequence_length=64):
-    """Prepare the sequences for training."""
+    """Prepare the sequences for training with improved error handling."""
     network_input = []
     network_output = []
     
-    # Use progress bar for sequence preparation
-    for i in tqdm(range(0, len(notes) - sequence_length), desc="Creating sequences"):
-        sequence_in = notes[i:i + sequence_length]
-        sequence_out = notes[i + sequence_length]
-        network_input.append([note_to_int[char] for char in sequence_in])
-        network_output.append(note_to_int[sequence_out])
+    try:
+        # Process in smaller batches to reduce memory pressure
+        batch_size = 5000
+        total_sequences = len(notes) - sequence_length
+        
+        for batch_start in range(0, total_sequences, batch_size):
+            batch_end = min(batch_start + batch_size, total_sequences)
+            print(f"Processing sequences {batch_start} to {batch_end} of {total_sequences}")
+            
+            for i in range(batch_start, batch_end):
+                sequence_in = notes[i:i + sequence_length]
+                sequence_out = notes[i + sequence_length]
+                
+                # Skip sequences with notes not in vocabulary
+                try:
+                    input_sequence = [note_to_int[char] for char in sequence_in]
+                    output_value = note_to_int[sequence_out]
+                    
+                    network_input.append(input_sequence)
+                    network_output.append(output_value)
+                except KeyError as e:
+                    print(f"Skipping sequence with unknown note: {e}")
+                    continue
+            
+            # Save intermediate results to avoid memory issues
+            print(f"Processed {len(network_input)} sequences so far...")
     
-    n_patterns = len(network_input)
+    except Exception as e:
+        print(f"Error in sequence preparation: {e}")
+        import traceback
+        traceback.print_exc()
     
-    # Convert to numpy arrays
-    network_input = np.array(network_input)
-    network_output = np.array(network_output)
-    
-    # Normalize input
-    vocab_size = len(note_to_int)
-    network_input = network_input / float(vocab_size)
+    # Convert to numpy arrays in chunks to avoid memory issues
+    try:
+        print("Converting to numpy arrays...")
+        # Convert in chunks of 10,000 sequences
+        max_chunk = 10000
+        network_input_np = []
+        
+        for i in range(0, len(network_input), max_chunk):
+            chunk = network_input[i:i + max_chunk]
+            network_input_np.append(np.array(chunk))
+        
+        network_input = np.vstack(network_input_np)
+        network_output = np.array(network_output)
+        
+        print(f"Final array shapes - input: {network_input.shape}, output: {network_output.shape}")
+    except Exception as e:
+        print(f"Error converting to numpy arrays: {e}")
+        import traceback
+        traceback.print_exc()
     
     return network_input, network_output
 
 def process_dataset(raw_dir, processed_dir, sequence_length=64, limit=None):
-    """Process the dataset and save tokenized versions."""
+    """Process the dataset with improved error handling."""
     os.makedirs(processed_dir, exist_ok=True)
     
-    # Check if already processed data exists
-    if (os.path.exists(os.path.join(processed_dir, 'inputs.npy')) and
-        os.path.exists(os.path.join(processed_dir, 'targets.npy')) and
-        os.path.exists(os.path.join(processed_dir, 'note_to_int.pkl'))):
-        
-        print("Processed data already exists. Loading...")
-        with open(os.path.join(processed_dir, 'vocab_size.txt'), 'r') as f:
-            vocab_size = int(f.read().strip())
-        
-        return None, None, None, None, vocab_size
-    
-    # Check if we have a saved notes file
-    if os.path.exists(os.path.join(processed_dir, 'all_notes.pkl')):
-        print("Loading previously extracted notes...")
-        with open(os.path.join(processed_dir, 'all_notes.pkl'), 'rb') as f:
-            notes = pickle.load(f)
-    else:
+    try:
         # Extract notes from MIDI files
         print("Starting MIDI processing...")
-        notes = process_midi_files(raw_dir, limit=limit, save_interval=1000, processed_dir=processed_dir)
+        notes = process_midi_files(raw_dir, limit=limit)
+        
+        if len(notes) == 0:
+            raise ValueError("No notes were extracted from MIDI files")
+        
+        print(f"Extracted {len(notes)} notes from MIDI files")
+        
+        # Save notes to file for recovery if later steps fail
+        notes_file = os.path.join(processed_dir, 'extracted_notes.pkl')
+        print(f"Saving extracted notes to {notes_file}")
+        with open(notes_file, 'wb') as f:
+            pickle.dump(notes, f)
+        
+        # Create mappings
+        note_to_int, int_to_note, vocab_size = create_mapping(notes)
+        
+        # Save mappings
+        with open(os.path.join(processed_dir, 'note_to_int.pkl'), 'wb') as f:
+            pickle.dump(note_to_int, f)
+        
+        with open(os.path.join(processed_dir, 'int_to_note.pkl'), 'wb') as f:
+            pickle.dump(int_to_note, f)
+        
+        # Save vocabulary size
+        with open(os.path.join(processed_dir, 'vocab_size.txt'), 'w') as f:
+            f.write(str(vocab_size))
+        
+        # Prepare sequences
+        print("Preparing sequences...")
+        inputs, targets = prepare_sequences(notes, note_to_int, sequence_length)
+        
+        # Save processed data
+        print("Saving processed data...")
+        np.save(os.path.join(processed_dir, 'inputs.npy'), inputs)
+        np.save(os.path.join(processed_dir, 'targets.npy'), targets)
+        
+        print(f"Processed {len(notes)} notes with vocabulary size {vocab_size}")
+        print(f"Created {len(inputs)} sequences of length {sequence_length}")
+        
+        return inputs, targets, note_to_int, int_to_note, vocab_size
     
-    if len(notes) == 0:
-        raise ValueError("No notes were extracted from MIDI files")
-    
-    # Create mappings
-    note_to_int, int_to_note, vocab_size = create_mapping(notes)
-    
-    # Save mappings
-    with open(os.path.join(processed_dir, 'note_to_int.pkl'), 'wb') as f:
-        pickle.dump(note_to_int, f)
-    
-    with open(os.path.join(processed_dir, 'int_to_note.pkl'), 'wb') as f:
-        pickle.dump(int_to_note, f)
-    
-    # Save vocabulary size
-    with open(os.path.join(processed_dir, 'vocab_size.txt'), 'w') as f:
-        f.write(str(vocab_size))
-    
-    # Prepare sequences
-    print("Preparing sequences...")
-    inputs, targets = prepare_sequences(notes, note_to_int, sequence_length)
-    
-    # Save processed data
-    print("Saving processed data...")
-    np.save(os.path.join(processed_dir, 'inputs.npy'), inputs)
-    np.save(os.path.join(processed_dir, 'targets.npy'), targets)
-    
-    print(f"Processed {len(notes)} notes with vocabulary size {vocab_size}")
-    print(f"Created {len(inputs)} sequences of length {sequence_length}")
-    
-    return inputs, targets, note_to_int, int_to_note, vocab_size
+    except Exception as e:
+        print(f"Error in dataset processing: {e}")
+        import traceback
+        traceback.print_exc()
+        return None, None, None, None, 0
 
 if __name__ == "__main__":
     import argparse
