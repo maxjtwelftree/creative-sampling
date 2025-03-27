@@ -199,6 +199,11 @@ try:
         learning_rate=5e-4,  # Initial learning rate
         lr_scheduler_type="cosine",  # Use cosine schedule
         warmup_ratio=0.1,  # Alternative: specify as a ratio of total steps
+        optim="adamw_torch",  # Use PyTorch's AdamW implementation
+        adam_beta1=0.9,  # Beta1 parameter for Adam
+        adam_beta2=0.999,  # Beta2 parameter for Adam
+        adam_epsilon=1e-8,  # Epsilon parameter for Adam
+        weight_decay=0.01,  # Weight decay for regularization
     )
     print("Training arguments configured")
 
