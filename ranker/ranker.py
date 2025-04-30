@@ -12,10 +12,12 @@ class Ranker:
         self.name = name or "default"
         self.elo = Elo()
         self.df = pd.read_parquet("./top_100.parquet")
+        self.df["rating"] = self.df["rating"].astype(float)
 
         log_path = f"./rank_log_{self.name}.parquet"
         if os.path.exists(log_path):
             self.log = pd.read_parquet(log_path)
+            self._apply_session_log()
         else:
             self.log = pd.DataFrame(columns=["id_1","id_2","winner","time"])
 
@@ -30,6 +32,12 @@ class Ranker:
 
         # 6) State for the current pair
         self.current_samples = None
+
+    def _apply_session_log(self):
+        for _, row in self.log.iterrows():
+            samples = (int(row["id_1"]), int(row["id_2"]))
+            winner  = int(row["winner"])
+            self.update(samples, winner)
 
     def select(self):
         """Randomly pick two distinct indices from the DataFrame."""
@@ -130,10 +138,21 @@ class Ranker:
         messagebox.showinfo("Log Saved", f"User log written to:\n{path}")
 
     def save_df(self):
-        """Overwrite the main top_100.parquet with updated ratings."""
+        """Overwrite the main top_100.parquet with updated ratings, then clear this user’s session log."""
+        # 1) overwrite main ratings
         path = "./top_100.parquet"
         self.df.to_parquet(path)
         messagebox.showinfo("Rankings Saved", f"Main DF updated:\n{path}")
+
+        # 2) delete the session log file if it exists
+        session_path = f"./rank_log_{self.name}.parquet"
+        if os.path.exists(session_path):
+            os.remove(session_path)
+
+        # 3) reset the in-memory log
+        self.log = pd.DataFrame(columns=["id_1", "id_2", "winner", "time"])
+        messagebox.showinfo("Session Reset", "Your session log has been cleared.")
+
 
     def on_closing(self):
         """Prompt to save the log, then exit."""
